@@ -1,7 +1,13 @@
 from dupylicate.libs.c cimport *
 from dupylicate.libs.ffmpeg cimport *
 
+cdef enum FileType:
+    FILE_TYPE_INVALID
+    FILE_TYPE_IMAGE
+    FILE_TYPE_VIDEO
+
 ctypedef struct FileInfo:
+    uint8_t file_type
     size_t file_size
     int64_t duration
     int width
@@ -30,9 +36,10 @@ cdef class VideoReader:
         AVPacket *av_packet
         SwsContext *sws_scaler_ctx
 
-    cdef bint open(self, char *file_path) nogil
+    cpdef bint open(self, char *file_path) except *
     cdef void get_info(self, FileInfo *info_ptr) nogil
-    cdef bint read_thumbnail(self, uint8_t[:, ::1] thumbnail) nogil
-    cdef bint seek_exact(self, int64_t time_stamp) nogil
-    cdef bint seek_approx(self, int64_t time_stamp) nogil
-    cdef void close(self) nogil
+    cpdef bint read_thumbnail(self, uint8_t[:, ::1] thumbnail) except *
+    cpdef bint read_frame(self, size_t width, size_t height, uint8_t[::1] frame) except *
+    cpdef bint seek_exact(self, int64_t time_stamp) except *
+    cpdef bint seek_approx(self, int64_t time_stamp) except *
+    cpdef void close(self) except *

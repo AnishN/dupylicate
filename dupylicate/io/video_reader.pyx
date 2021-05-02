@@ -8,7 +8,7 @@ cdef class VideoReader:
     def __dealloc__(self):
         pass
 
-    cdef bint open(self, char *file_path) nogil:
+    cpdef bint open(self, char *file_path) except *:
         cdef:
             size_t i
             AVCodecParameters *av_codec_params
@@ -91,6 +91,7 @@ cdef class VideoReader:
             AVRational frame_rate
 
         #set default values for file info
+        info_ptr.file_type = FILE_TYPE_INVALID
         info_ptr.duration = 0
         info_ptr.width = 0
         info_ptr.height = 0
@@ -125,20 +126,24 @@ cdef class VideoReader:
             if converted_duration == 1:
                 duration = 0
             info_ptr.duration = duration
+            if info_ptr.duration > 0:
+                info_ptr.file_type = FILE_TYPE_VIDEO
+            else:
+                info_ptr.file_type = FILE_TYPE_IMAGE
 
             frame_rate = av_stream.avg_frame_rate
             if frame_rate.den != 0:
                 info_ptr.frame_rate = float(frame_rate.num) / frame_rate.den
         
-        #get audio stream data
-        if self.audio_stream_index != -1:
-            av_stream = self.av_format_ctx.streams[self.audio_stream_index]
-            av_params = av_stream.codecpar
-            info_ptr.sample_rate = av_params.sample_rate
-            info_ptr.num_channels = av_params.channels
-            info_ptr.audio_codec = av_params.codec_id
+            #get audio stream data
+            if self.audio_stream_index != -1:
+                av_stream = self.av_format_ctx.streams[self.audio_stream_index]
+                av_params = av_stream.codecpar
+                info_ptr.sample_rate = av_params.sample_rate
+                info_ptr.num_channels = av_params.channels
+                info_ptr.audio_codec = av_params.codec_id
 
-    cdef bint read_thumbnail(self, uint8_t[:, ::1] thumbnail) nogil:
+    cpdef bint read_thumbnail(self, uint8_t[:, ::1] thumbnail) except *:
         cdef:
             int response
             uint8_t *thumbnail_ptr = &thumbnail[0, 0]
@@ -191,7 +196,85 @@ cdef class VideoReader:
         sws_freeContext(self.sws_scaler_ctx)
         return True
 
-    cdef bint seek_exact(self, int64_t time_stamp) nogil:
+    cpdef bint read_frame(self, size_t width, size_t height, uint8_t[::1] frame) except *:
+        cdef:
+            int response
+            uint8_t *frame_ptr = &frame[0]
+            size_t y
+            uint8_t *dst
+            uint8_t *src
+            size_t bytes_per_line
+            AVFrame *av_frame
+            size_t frame_size
+        
+        bytes_per_line = width * 3 * sizeof(uint8_t)
+        av_frame = av_frame_alloc()
+        if av_frame == NULL:
+            return False
+        
+        frame_size = av_image_get_buffer_size(
+            AV_PIX_FMT_RGB24, 
+            width,
+            height,
+            32,
+        )
+        frame_buffer = <uint8_t *>calloc(frame_size, sizeof(uint8_t))
+        av_image_fill_arrays(
+            av_frame.data,
+            av_frame.linesize, 
+            frame_ptr,
+            AV_PIX_FMT_RGB24, 
+            width,
+            height,
+            32,
+        )
+
+        while av_read_frame(self.av_format_ctx, self.av_packet) >= 0:
+            if self.av_packet.stream_index != self.video_stream_index:
+                av_packet_unref(self.av_packet)
+                continue
+            response = avcodec_send_packet(self.av_codec_ctx, self.av_packet)
+            if response < 0:
+                return False
+            response = avcodec_receive_frame(self.av_codec_ctx, self.av_frame_original)
+            if response == AVERROR(EAGAIN) or response == AVERROR_EOF:
+                av_packet_unref(self.av_packet)
+                continue
+            elif response < 0:
+                return False
+            av_packet_unref(self.av_packet)
+            break
+
+        if self.av_codec_ctx.pix_fmt == AV_PIX_FMT_NONE:
+            return False
+        
+        self.sws_scaler_ctx = sws_getContext(
+            self.width, self.height, self.av_codec_ctx.pix_fmt,
+            width, height, AV_PIX_FMT_RGB24,
+            SWS_BILINEAR, NULL, NULL, NULL,
+        )
+        if self.sws_scaler_ctx == NULL:
+            return False
+        
+        sws_scale(
+            self.sws_scaler_ctx, 
+            self.av_frame_original.data, 
+            self.av_frame_original.linesize, 
+            0, 
+            self.av_frame_original.height, 
+            av_frame.data,
+            av_frame.linesize,
+        )
+
+        for y in range(height):
+            dst = frame_ptr + y * bytes_per_line
+            src = av_frame.data[0] + y * av_frame.linesize[0]# * 3
+            memcpy(dst, src, bytes_per_line)
+        
+        sws_freeContext(self.sws_scaler_ctx)
+        return True
+
+    cpdef bint seek_exact(self, int64_t time_stamp) except *:
         cdef:
             int response
             int i = 0
@@ -225,7 +308,7 @@ cdef class VideoReader:
                 break
         return True
 
-    cdef bint seek_approx(self, int64_t time_stamp) nogil:
+    cpdef bint seek_approx(self, int64_t time_stamp) except *:
         cdef:
             int response
             AVStream *av_stream
@@ -253,7 +336,7 @@ cdef class VideoReader:
             break
         return True
 
-    cdef void close(self) nogil:
+    cpdef void close(self) except *:
         if self.av_format_ctx != NULL:
             avformat_close_input(&self.av_format_ctx)
             avformat_free_context(self.av_format_ctx)

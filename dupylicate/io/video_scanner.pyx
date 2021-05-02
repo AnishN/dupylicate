@@ -87,32 +87,31 @@ cdef class VideoScanner:
         info_ptr = &self.file_infos[i]
         success = self.reader.open(file_path)
         if success:
-            with nogil:
-                self.reader.get_info(info_ptr)
-                duration = info_ptr.duration
-                is_video = duration > 0
-                included = (not is_video and self.include_images) or (is_video and self.include_videos)
-                if included:
-                    #print(i, file_path, is_video, duration)
-                    if is_video:
-                        for j in range(self.num_thumbnails):
-                            thumbnail_time_stamp = <int64_t>(self.positions[j] * duration)
-                            #print(j, thumbnail_time_stamp)
-                            if self.seek_exact:
-                                success = self.reader.seek_exact(thumbnail_time_stamp)
-                            else:
-                                success = self.reader.seek_approx(thumbnail_time_stamp)
-                            #print(success)
-                            if success:
-                                self.reader.read_thumbnail(self.thumbnails[i, j])
-                                #self.save_thumbnail(i, j)
-                            else:
-                                included = False
-                                #break
-                    else:#must be image
-                        for j in range(self.num_thumbnails):
+            self.reader.get_info(info_ptr)
+            duration = info_ptr.duration
+            is_video = duration > 0
+            included = (not is_video and self.include_images) or (is_video and self.include_videos)
+            if included:
+                #print(i, file_path, is_video, duration)
+                if is_video:
+                    for j in range(self.num_thumbnails):
+                        thumbnail_time_stamp = <int64_t>(self.positions[j] * duration)
+                        #print(j, thumbnail_time_stamp)
+                        if self.seek_exact:
+                            success = self.reader.seek_exact(thumbnail_time_stamp)
+                        else:
+                            success = self.reader.seek_approx(thumbnail_time_stamp)
+                        #print(success)
+                        if success:
                             self.reader.read_thumbnail(self.thumbnails[i, j])
                             #self.save_thumbnail(i, j)
+                        else:
+                            included = False
+                            #break
+                else:#must be image
+                    for j in range(self.num_thumbnails):
+                        self.reader.read_thumbnail(self.thumbnails[i, j])
+                        #self.save_thumbnail(i, j)
         #print(i, file_path, duration, included, self.include_images, self.include_videos)
         self.included_files[i] = included
         self.reader.close()
@@ -192,6 +191,7 @@ cdef class VideoScanner:
                             raise ValueError("VideoScanner: file path length > 4096 characters")
                         memcpy(&match_ptr.file_path[0], <char *>file_path, file_path_len)
                         info_ptr = &self.file_infos[j]
+                        match_ptr.file_type = info_ptr.file_type
                         match_ptr.file_size = info_ptr.file_size
                         match_ptr.duration = info_ptr.duration
                         match_ptr.width = info_ptr.width
